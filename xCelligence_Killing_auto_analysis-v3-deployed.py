@@ -51,7 +51,7 @@ def determine_assay_status(extracted_treatment_data, main_df):
                         # else: Value '1' not found in column - does not fail
                             # If '1' is not found, this column does not trigger a fail. Continue to next column.
                                 
-                    except Exception: # Keep it generic to catch any processing error for the column
+                    except (ValueError, TypeError): # Keep it generic to catch any processing error for the column
                         return "Fail"
 
                 # If all valid_well_columns_for_assay for this Med sample were processed
@@ -101,7 +101,7 @@ st.markdown(
 )
 
 # Add a file uploader widget
-uploaded_file = st.file_uploader("Choose an csv file (.xlsx)", type=['xlsx'])
+uploaded_file = st.file_uploader("Choose an Excel file (.xlsx)", type=['xlsx'])
 
 # Check if a file has been uploaded
 if uploaded_file is not None:
@@ -235,24 +235,31 @@ if uploaded_file is not None:
                     # Ensure no duplicates if "Treatments" somehow matched the pattern (unlikely but safe)
                     cols_to_forward_fill = sorted(list(set(cols_to_forward_fill)))
 
-                    for col_ff in cols_to_forward_fill:
-                        if col_ff in st.session_state.sample_info_df.columns: # Ensure column still exists
-                            for i in range(len(st.session_state.sample_info_df)):
-                                # Ensure we don't try to write past the end of the DataFrame
-                                if i + 2 >= len(st.session_state.sample_info_df):
-                                    break
+                    # Create a copy of the DataFrame to avoid SettingWithCopyWarning
+                    if st.session_state.sample_info_df is not None:
+                        sample_info_df_copy = st.session_state.sample_info_df.copy()
+                        
+                        for col_ff in cols_to_forward_fill:
+                            if col_ff in sample_info_df_copy.columns: # Ensure column still exists
+                                for i in range(len(sample_info_df_copy)):
+                                    # Ensure we don't try to write past the end of the DataFrame
+                                    if i + 2 >= len(sample_info_df_copy):
+                                        break
 
-                                current_val_str = str(st.session_state.sample_info_df.loc[i, col_ff]) # Ensure it's a string
-                                
-                                # Check if it's actual text (not empty or a stringified NaN/None)
-                                is_actual_text = current_val_str.strip() not in ['', 'nan', 'None', '<NA>']
-                                
-                                if is_actual_text:
-                                    value_to_copy = current_val_str
-                                    st.session_state.sample_info_df.loc[i + 1, col_ff] = value_to_copy
-                                    st.session_state.sample_info_df.loc[i + 2, col_ff] = value_to_copy
-                                    # st.write(f"Forward filled '{value_to_copy}' in column '{col_ff}' from row {i}.") # Optional debug
-                                    break # Stop after finding and processing the first text in this column
+                                    current_val_str = str(sample_info_df_copy.loc[i, col_ff]) # Ensure it's a string
+                                    
+                                    # More comprehensive check for empty/null values
+                                    is_actual_text = current_val_str.strip().lower() not in ['', 'nan', 'none', '<na>', 'null', 'undefined', 'n/a']
+                                    
+                                    if is_actual_text:
+                                        value_to_copy = current_val_str
+                                        sample_info_df_copy.loc[i + 1, col_ff] = value_to_copy
+                                        sample_info_df_copy.loc[i + 2, col_ff] = value_to_copy
+                                        # st.write(f"Forward filled '{value_to_copy}' in column '{col_ff}' from row {i}.") # Optional debug
+                                        break # Stop after finding and processing the first text in this column
+                        
+                        # Assign the modified copy back to the session state
+                        st.session_state.sample_info_df = sample_info_df_copy
                 
                 # Drop columns after "Target" column
                 if st.session_state.sample_info_df is not None:
@@ -292,11 +299,15 @@ if uploaded_file is not None:
                             
                             column_specific_data = {}
                             for index, row in st.session_state.sample_info_df.iterrows():
+                                # Validate column existence before access
+                                if treat_col_name not in row or 'Input ID' not in row:
+                                    continue
+                                        
                                 treatment_text = str(row[treat_col_name])
                                 input_id = str(row['Input ID'])
 
-                                # Check if treatment_text is actual meaningful text
-                                is_valid_text = treatment_text.strip() not in ['', 'nan', 'None', '<NA>']
+                                # More comprehensive check for empty/null values
+                                is_valid_text = treatment_text.strip().lower() not in ['', 'nan', 'none', '<na>', 'null', 'undefined', 'n/a']
                                 
                                 if is_valid_text:
                                     if treatment_text not in column_specific_data:
@@ -367,18 +378,29 @@ if uploaded_file is not None:
                                 
                                 for well_col_name in valid_well_columns:
                                     try:
+                                        # Convert to numeric, coercing errors to NaN
                                         well_data_series = pd.to_numeric(st.session_state.main_data_df[well_col_name], errors='coerce')
+                                        
+                                        # Check if we have any valid numeric data after coercion
+                                        if well_data_series.notna().sum() == 0:
+                                            # No valid numeric data in this column
+                                            continue
+                                            
+                                        # Find indices where value is 1
                                         indices_at_1 = well_data_series[well_data_series == 1].index
                                         
                                         if not indices_at_1.empty:
                                             idx_at_1 = indices_at_1[0]
-                                            well_data_after_1 = well_data_series.loc[idx_at_1:].iloc[1:]
-                                            valid_numeric_after_1 = well_data_after_1.dropna()
                                             
-                                            if not valid_numeric_after_1.empty:
-                                                if (valid_numeric_after_1 <= 0.5).any():
-                                                    all_values_above_threshold = False
-                                    except Exception:
+                                            # Logic to determine killed_status
+                                            data_for_killing_check = well_data_series.loc[idx_at_1:].iloc[1:]
+                                            if not data_for_killing_check.empty:
+                                                numeric_values_for_killing_check = data_for_killing_check.dropna()
+                                                if not numeric_values_for_killing_check.empty:
+                                                    if (numeric_values_for_killing_check <= 0.5).any():
+                                                        all_values_above_threshold = False
+                                    except (ValueError, TypeError, KeyError, IndexError) as e:
+                                        st.warning(f"Error processing column {well_col_name}: {str(e)}")
                                         all_values_above_threshold = False
             
             # Create a styled checkbox for each criterion
@@ -494,18 +516,26 @@ if uploaded_file is not None:
                                                     if (numeric_values_for_killing_check <= 0.5).any():
                                                         killed_status = "Yes"
     
-                                            # Data after the '1'
-                                            well_data_after_1 = well_data_series.loc[idx_at_1:].iloc[1:]
-                                            
-                                            if not well_data_after_1.empty:
-                                                # Find value closest to 0.5
-                                                idx_closest_to_0_5 = (well_data_after_1 - 0.5).abs().idxmin()
+                                            # Check if there's data after idx_at_1
+                                            if idx_at_1 < len(well_data_series) - 1:
+                                                # Data after the '1'
+                                                well_data_after_1 = well_data_series.loc[idx_at_1:].iloc[1:]
                                                 
-                                                closest_to_0_5_hour_val = assay_display_df.loc[idx_closest_to_0_5, "Time (Hour)"]
-                                                closest_to_0_5_hhmmss_val = assay_display_df.loc[idx_closest_to_0_5, "Time (hh:mm:ss)"]
-    
-                                                # Data for the new requested DataFrame
-                                                half_killing_time_calc = closest_to_0_5_hour_val - time_at_1_hour # Moved up for clarity
+                                                if not well_data_after_1.empty:
+                                                    try:
+                                                        # Find value closest to 0.5
+                                                        idx_closest_to_0_5 = (well_data_after_1 - 0.5).abs().idxmin()
+                                                        
+                                                        # Validate that the index exists in the DataFrame
+                                                        if idx_closest_to_0_5 in assay_display_df.index:
+                                                            closest_to_0_5_hour_val = assay_display_df.loc[idx_closest_to_0_5, "Time (Hour)"]
+                                                            closest_to_0_5_hhmmss_val = assay_display_df.loc[idx_closest_to_0_5, "Time (hh:mm:ss)"]
+            
+                                                            # Data for the new requested DataFrame
+                                                            half_killing_time_calc = closest_to_0_5_hour_val - time_at_1_hour # Moved up for clarity
+                                                    except (ValueError, KeyError, IndexError) as e:
+                                                        st.warning(f"Error calculating closest value to 0.5 for well {well_col_name}: {str(e)}")
+                                                        continue
     
                                                 target_data_row = {
                                                     "Sample Name": assay_name_key,
@@ -535,10 +565,14 @@ if uploaded_file is not None:
                                     st.markdown("---")
     
                                 except KeyError as e:
-                                    st.error(f"Error creating table or calculating for Sample '{assay_name_key}' (Treatment '{treatment_group}'): A required data column was not found. Details: {e}")
+                                    st.error(f"Error creating table for Sample '{assay_name_key}' (Treatment '{treatment_group}'): A required data column was not found. Details: {e}")
+                                    st.markdown("---")
+                                except (ValueError, TypeError) as e:
+                                    st.error(f"Data type error while processing Sample '{assay_name_key}' (Treatment '{treatment_group}'): {e}")
                                     st.markdown("---")
                                 except Exception as e:
-                                    st.error(f"An unexpected error occurred while creating table for Sample '{assay_name_key}' (Treatment '{treatment_group}'): {e}")
+                                    st.error(f"An unexpected error occurred while creating table for Sample '{assay_name_key}' (Treatment '{treatment_group}'): {type(e).__name__}: {e}")
+                                    st.markdown("---")
                                     
                     
                 # --- Display the new DataFrame for "Closest to 0.5" values ---
@@ -654,7 +688,7 @@ if uploaded_file is not None:
                         final_columns_for_stats_df = [col for col in final_columns_for_stats_df if col in stats_df.columns]
                         stats_df = stats_df[final_columns_for_stats_df]
 
-                        st.dataframe(stats_df)
+                        st.dataframe(stats_df.astype(str))
                     # --- End of Statistics Table ---
 
 # --- Export Results Section ---
