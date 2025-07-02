@@ -385,7 +385,7 @@ if uploaded_file is not None:
             col1, col2 = st.columns([3, 1])
             
             with col1:
-                st.markdown("1. Med sample found in data")
+                st.markdown("1. Medium sample found in data")
             with col2:
                 if med_sample_found:
                     st.markdown("✅ Pass")
@@ -393,15 +393,7 @@ if uploaded_file is not None:
                     st.markdown("❌ Fail")
             
             with col1:
-                st.markdown("2. Valid columns found for Med sample")
-            with col2:
-                if valid_columns_found:
-                    st.markdown("✅ Pass")
-                else:
-                    st.markdown("❌ Fail")
-            
-            with col1:
-                st.markdown("3. All values after normalized index 1 remain above 0.5")
+                st.markdown("2. All medium index values after normalized index remain above 0.5")
             with col2:
                 if all_values_above_threshold:
                     st.markdown("✅ Pass")
