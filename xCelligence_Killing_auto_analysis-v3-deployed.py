@@ -343,6 +343,72 @@ if uploaded_file is not None:
                 st.markdown(f"### <span style='color:red;'>Assay Status: {assay_status}</span>", unsafe_allow_html=True)
             else: # Pending
                 st.markdown(f"### <span style='color:orange;'>Assay Status: {assay_status}</span>", unsafe_allow_html=True)
+            
+            # --- Assay Status Criteria Checklist ---
+            st.markdown("#### Assay Status Criteria:")
+            
+            # Determine criteria status
+            med_sample_found = False
+            valid_columns_found = False
+            all_values_above_threshold = True
+            
+            if st.session_state.get('extracted_treatment_data') is not None:
+                for treatment_group, assays in st.session_state.extracted_treatment_data.items():
+                    for assay_name_key, input_ids in assays.items():
+                        assay_name_str = str(assay_name_key).strip()
+                        if assay_name_str.upper().startswith("MED"):
+                            med_sample_found = True
+                            
+                            potential_column_names = [str(id_str).strip() for id_str in input_ids if id_str is not None]
+                            valid_well_columns = [name for name in potential_column_names if name in st.session_state.main_data_df.columns]
+                            
+                            if valid_well_columns:
+                                valid_columns_found = True
+                                
+                                for well_col_name in valid_well_columns:
+                                    try:
+                                        well_data_series = pd.to_numeric(st.session_state.main_data_df[well_col_name], errors='coerce')
+                                        indices_at_1 = well_data_series[well_data_series == 1].index
+                                        
+                                        if not indices_at_1.empty:
+                                            idx_at_1 = indices_at_1[0]
+                                            well_data_after_1 = well_data_series.loc[idx_at_1:].iloc[1:]
+                                            valid_numeric_after_1 = well_data_after_1.dropna()
+                                            
+                                            if not valid_numeric_after_1.empty:
+                                                if (valid_numeric_after_1 <= 0.5).any():
+                                                    all_values_above_threshold = False
+                                    except Exception:
+                                        all_values_above_threshold = False
+            
+            # Create a styled checkbox for each criterion
+            col1, col2 = st.columns([3, 1])
+            
+            with col1:
+                st.markdown("1. Med sample found in data")
+            with col2:
+                if med_sample_found:
+                    st.markdown("✅ Pass")
+                else:
+                    st.markdown("❌ Fail")
+            
+            with col1:
+                st.markdown("2. Valid columns found for Med sample")
+            with col2:
+                if valid_columns_found:
+                    st.markdown("✅ Pass")
+                else:
+                    st.markdown("❌ Fail")
+            
+            with col1:
+                st.markdown("3. All values after normalized index 1 remain above 0.5")
+            with col2:
+                if all_values_above_threshold:
+                    st.markdown("✅ Pass")
+                else:
+                    st.markdown("❌ Fail")
+            
+            # --- End of Assay Status Criteria Checklist ---
             # --- End of Overall Assay Status Display ---
 # --- Display Detailed DataFrames for Each Assay (NEW - Attempt 2) ---
             if st.session_state.get('main_data_df') is not None and not st.session_state.main_data_df.empty and \
