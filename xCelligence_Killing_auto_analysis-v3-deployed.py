@@ -58,8 +58,8 @@ def determine_assay_status(extracted_treatment_data, main_df):
                 # and none triggered a "Fail" based on the "after 1" logic, then this Med sample (and thus the assay) is "Pass".
                 return "Pass"
 
-    # If the loops complete, no "Med" sample was found.
-    return "Pending"
+    # If the loops complete, no "Med" sample was found. This is a failure condition
+    return "Fail"
 # Helper function to convert multiple DataFrames to a single Excel bytes object, each DF on a new sheet
 def dfs_to_excel_bytes(dfs_map):
     output = io.BytesIO()
@@ -196,6 +196,14 @@ if uploaded_file is not None:
                         if st.session_state.sample_info_df[col].dtype == 'object':
                             st.session_state.sample_info_df[col] = st.session_state.sample_info_df[col].astype(str)
                     # st.write("Converted all 'object' dtype columns in Sample Information Table to string.") # Optional debug
+
+                # Ensure 'Target' column exists by aliasing 'Cell' or 'cell'
+                if st.session_state.sample_info_df is not None:
+                    if "Target" not in st.session_state.sample_info_df.columns:
+                        for alt_name in ["Cell", "cell", "target"]:
+                            if alt_name in st.session_state.sample_info_df.columns:
+                                st.session_state.sample_info_df = st.session_state.sample_info_df.rename(columns={alt_name: "Target"})
+                                break
 
                 # Rename columns between "Treatments" and "Target"
                 if st.session_state.sample_info_df is not None:
@@ -403,6 +411,10 @@ if uploaded_file is not None:
                                         st.warning(f"Error processing column {well_col_name}: {str(e)}")
                                         all_values_above_threshold = False
             
+            # If no Med sample was found, criterion 2 must automatically fail
+            if not med_sample_found:
+                all_values_above_threshold = False
+
             # Create a styled checkbox for each criterion
             col1, col2 = st.columns([3, 1])
             
