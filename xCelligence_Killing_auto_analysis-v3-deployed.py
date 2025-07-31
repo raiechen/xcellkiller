@@ -66,7 +66,13 @@ def dfs_to_excel_bytes(dfs_map):
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         for sheet_name, df in dfs_map.items():
             if df is not None and not df.empty: # Only write if DataFrame exists and is not empty
-                df.to_excel(writer, index=False, sheet_name=sheet_name)
+                # Ensure sheet name is within Excel's 31-character limit
+                safe_sheet_name = sheet_name[:31] if len(sheet_name) > 31 else sheet_name
+                # Remove invalid characters for Excel sheet names
+                invalid_chars = ['[', ']', ':', '*', '?', '/', '\\']
+                for char in invalid_chars:
+                    safe_sheet_name = safe_sheet_name.replace(char, '_')
+                df.to_excel(writer, index=False, sheet_name=safe_sheet_name)
     processed_data = output.getvalue()
     return processed_data
 
@@ -100,13 +106,37 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# Add a file uploader widget
-uploaded_file = st.file_uploader("Choose an Excel file (.xlsx)", type=['xlsx'])
+# Add a file uploader widget for multiple files
+uploaded_files = st.file_uploader("Choose Excel files (.xlsx)", type=['xlsx'], accept_multiple_files=True)
 
-# Check if a file has been uploaded
-if uploaded_file is not None:
+# Initialize session state for storing results from all files
+if 'all_files_results' not in st.session_state:
+    st.session_state.all_files_results = {}
+
+# Check if files have been uploaded
+if uploaded_files:
     
-        # Specific sheet name and header text
+    # Clear previous results when new files are uploaded
+    st.session_state.all_files_results = {}
+    
+    # Process each uploaded file
+    for file_index, uploaded_file in enumerate(uploaded_files):
+        
+        # Create a container for this file's results
+        with st.container():
+            st.markdown(f"## 📁 File {file_index + 1}: {uploaded_file.name}")
+            st.markdown("---")
+            
+            # Store current file results
+            current_file_results = {
+                'file_name': uploaded_file.name,
+                'assay_status': "Pending",
+                'assay_type': "Error - test type can't be found in file name",
+                'closest_df': None,
+                'stats_df': None
+            }
+    
+                # Specific sheet name and header text
         sheet_name = "Data Analysis - Curve"
         header_text = "Time (Hour)"
         custom_error_message = f"Error: Could not find '{sheet_name}' sheet or '{header_text}' header in the uploaded Excel file. Please check the file."
@@ -117,6 +147,7 @@ if uploaded_file is not None:
         if sheet_name not in excel_file.sheet_names:
             st.error(custom_error_message)
             st.session_state.data_frame = None # Ensure no stale data
+            continue  # Skip to next file
         else:
 # --- Main Numerical Data Table Extraction and Display (NEW) ---
             st.session_state.main_data_df = None # Initialize/reset
@@ -341,6 +372,9 @@ if uploaded_file is not None:
                     st.session_state.extracted_treatment_data,
                     st.session_state.main_data_df
                 )
+            
+            # Store assay status for this file
+            current_file_results['assay_status'] = assay_status
 
 # --- Determine and Display Assay Type from filename ---
             assay_type_str = "Error - test type can't be found in file name"
@@ -352,6 +386,9 @@ if uploaded_file is not None:
                 elif "bcma" in uploaded_file.name.lower(): # Case-insensitive check
                     assay_type_str = "BCMA"
                     assay_type_color = "green"
+            
+            # Store assay type for this file
+            current_file_results['assay_type'] = assay_type_str
             
             st.markdown(f"### <span style='color:{assay_type_color};'>Assay Type: {assay_type_str}</span>", unsafe_allow_html=True)
             # --- End of Assay Type Display ---
@@ -701,39 +738,140 @@ if uploaded_file is not None:
                         stats_df = stats_df[final_columns_for_stats_df]
 
                         st.dataframe(stats_df.astype(str))
+                        
+                        # Store results for this file
+                        current_file_results['stats_df'] = stats_df.copy()
                     # --- End of Statistics Table ---
-
-# --- Export Results Section ---
-                st.markdown("---")
-                st.header("Export Results")
-
-                # Prepare data for multi-sheet Excel
-                # Ensure DataFrames exist before trying to add them to the dictionary
-                data_to_export = {}
-
-                # Add Assay Status to the export
-                if 'assay_status' in locals() and assay_status: # Check if assay_status exists and is not empty
-                    status_df = pd.DataFrame({'Assay Status': [assay_status]})
-                    data_to_export["Assay_Status"] = status_df
-                
-                if 'closest_df' in locals() and closest_df is not None and not closest_df.empty:
-                    data_to_export["Summary_Closest_to_0.5"] = closest_df
-                
-                if 'stats_df' in locals() and stats_df is not None and not stats_df.empty:
-                    data_to_export["Half_Killing_Stats"] = stats_df
-
-                if data_to_export: # Only show button if there's something to export
-                    excel_bytes_all_summaries = dfs_to_excel_bytes(data_to_export)
-                    st.download_button(
-                        label="📥 Download Results as Excel", # Added an icon as per image
-                        data=excel_bytes_all_summaries,
-                        file_name=f"summary_results_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                    )
+                    
+                    # Store closest_df for this file
+                    current_file_results['closest_df'] = closest_df.copy()
                 else:
-                    st.caption("No summary data available to export.")
-                # --- End of Export Results Section ---
-                # --- End of new DataFrame display ---
+                    # No closest data for this file
+                    current_file_results['closest_df'] = None
+                    current_file_results['stats_df'] = None
 
-            # --- End of Display Detailed DataFrames for Each Assay ---
+            # Store this file's results in session state
+            st.session_state.all_files_results[uploaded_file.name] = current_file_results
+    # --- Combined Export Results Section for All Files ---
+    st.markdown("---")
+    st.header("📊 Combined Results from All Files")
+    
+    if st.session_state.all_files_results:
+        # Display summary of all files
+        st.subheader("File Processing Summary")
+        summary_data = []
+        for file_name, results in st.session_state.all_files_results.items():
+            summary_data.append({
+                'File Name': file_name,
+                'Assay Type': results['assay_type'],
+                'Assay Status': results['assay_status'],
+                'Has Data': 'Yes' if results['closest_df'] is not None else 'No'
+            })
+        
+        summary_df = pd.DataFrame(summary_data)
+        st.dataframe(summary_df)
+        
+        # Prepare combined data for export
+        combined_data_to_export = {}
+        
+        # Add file summary (ensure sheet name is within limits)
+        combined_data_to_export["File_Summary"] = summary_df
+        
+        # Combine all closest_df data
+        all_closest_dfs = []
+        for file_name, results in st.session_state.all_files_results.items():
+            if results['closest_df'] is not None:
+                temp_df = results['closest_df'].copy()
+                temp_df['Source_File'] = file_name
+                temp_df['Assay_Type'] = results['assay_type']
+                temp_df['Assay_Status'] = results['assay_status']
+                all_closest_dfs.append(temp_df)
+        
+        if all_closest_dfs:
+            combined_closest_df = pd.concat(all_closest_dfs, ignore_index=True)
+            # Reorder columns to put file info first
+            cols = ['Source_File', 'Assay_Type', 'Assay_Status'] + [col for col in combined_closest_df.columns if col not in ['Source_File', 'Assay_Type', 'Assay_Status']]
+            combined_closest_df = combined_closest_df[cols]
+            # Use shortened sheet name that fits Excel's 31-character limit
+            combined_data_to_export["Combined_Closest_0.5"] = combined_closest_df
+            
+            st.subheader("Combined Summary: Time Closest to 0.5 Normalized Cell Index")
+            st.dataframe(combined_closest_df)
+        
+        # Combine all stats_df data
+        all_stats_dfs = []
+        for file_name, results in st.session_state.all_files_results.items():
+            if results['stats_df'] is not None:
+                temp_df = results['stats_df'].copy()
+                temp_df['Source_File'] = file_name
+                temp_df['Assay_Type'] = results['assay_type']
+                temp_df['Assay_Status'] = results['assay_status']
+                all_stats_dfs.append(temp_df)
+        
+        if all_stats_dfs:
+            combined_stats_df = pd.concat(all_stats_dfs, ignore_index=True)
+            # Reorder columns to put file info first
+            cols = ['Source_File', 'Assay_Type', 'Assay_Status'] + [col for col in combined_stats_df.columns if col not in ['Source_File', 'Assay_Type', 'Assay_Status']]
+            combined_stats_df = combined_stats_df[cols]
+            # Use shortened sheet name that fits Excel's 31-character limit
+            combined_data_to_export["Combined_Half_Kill_Stats"] = combined_stats_df
+            
+            st.subheader("Combined Half-killing Time Statistics by Sample")
+            st.dataframe(combined_stats_df)
+        
+        # Add individual file data as separate sheets
+        for file_index, (file_name, results) in enumerate(st.session_state.all_files_results.items(), 1):
+            # Create a safe, short sheet name that fits Excel's 31-character limit
+            # Remove common extensions and problematic characters
+            base_name = file_name.replace('.xlsx', '').replace('.xls', '').replace(' ', '_')
+            # Remove special characters that might cause issues
+            base_name = ''.join(c for c in base_name if c.isalnum() or c in ['_', '-'])
+            
+            # Create sheet names with sufficient room for suffix
+            # Max 31 chars: leave 9 chars for "_Closest" or "_Stats" suffix
+            max_base_length = 22
+            
+            if len(base_name) > max_base_length:
+                # Truncate and add file number to ensure uniqueness
+                safe_base = f"File{file_index}_{base_name[:max_base_length-8]}"
+            else:
+                safe_base = base_name
+            
+            # Ensure the final names don't exceed 31 characters
+            closest_sheet_name = safe_base + "_Closest"
+            stats_sheet_name = safe_base + "_Stats"
+            
+            # Double-check and truncate if still too long
+            if len(closest_sheet_name) > 31:
+                closest_sheet_name = safe_base[:22] + "_Closest"
+            if len(stats_sheet_name) > 31:
+                stats_sheet_name = safe_base[:25] + "_Stats"
+            
+            if results['closest_df'] is not None:
+                combined_data_to_export[closest_sheet_name] = results['closest_df']
+            
+            if results['stats_df'] is not None:
+                combined_data_to_export[stats_sheet_name] = results['stats_df']
+        
+        # Download button for combined results
+        if combined_data_to_export:
+            excel_bytes_combined = dfs_to_excel_bytes(combined_data_to_export)
+            st.download_button(
+                label="📥 Download Combined Results from All Files", 
+                data=excel_bytes_combined,
+                file_name=f"combined_results_{len(st.session_state.all_files_results)}_files_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+        else:
+            st.caption("No data available to export from any files.")
+    else:
+        st.info("No files have been processed yet. Please upload Excel files to see combined results.")
+
+# --- End of Combined Export Results Section ---
+else:
+    st.info("Please upload one or more Excel files (.xlsx) to begin analysis.")
+    
+    # Clear any previous results when no files are uploaded
+    if 'all_files_results' in st.session_state:
+        st.session_state.all_files_results = {}
     
