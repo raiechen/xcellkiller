@@ -102,7 +102,7 @@ def format_kill_summary(series):
 
 # Set the title of the Streamlit app
 st.markdown(
-    "<h2 style='text-align: left; color: black;'>xCELLigence Killing App beta v1.0 ⚔️</h2>",
+    "<h2 style='text-align: left; color: black;'>Lonza xCELLigence Killing App beta v1.0 ⚔️</h2>",
     unsafe_allow_html=True
 )
 
