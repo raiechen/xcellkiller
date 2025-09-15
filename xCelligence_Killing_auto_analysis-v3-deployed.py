@@ -15,7 +15,7 @@ def determine_assay_status(extracted_treatment_data, main_df):
         for assay_name_key, input_ids in assays.items():
             # Ensure assay_name_key is treated as a string for startswith
             assay_name_str = str(assay_name_key).strip()
-            if assay_name_str.upper().startswith("MED"):
+            if assay_name_str.upper().startswith("MED") or assay_name_str.upper().startswith("ONLY"):
                 # First "Med" sample found, its status determines the overall assay status.
                 
                 # Ensure input_ids are processed as strings and handle None
@@ -412,7 +412,7 @@ if uploaded_files:
                 for treatment_group, assays in st.session_state.extracted_treatment_data.items():
                     for assay_name_key, input_ids in assays.items():
                         assay_name_str = str(assay_name_key).strip()
-                        if assay_name_str.upper().startswith("MED"):
+                        if assay_name_str.upper().startswith("MED") or assay_name_str.upper().startswith("ONLY"):
                             med_sample_found = True
                             
                             potential_column_names = [str(id_str).strip() for id_str in input_ids if id_str is not None]
