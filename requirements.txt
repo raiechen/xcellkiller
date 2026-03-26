@@ -1,2 +1,6 @@
 streamlit
 python-pptx
+pandas
+openpyxl
+python-docx
+pdfplumber
